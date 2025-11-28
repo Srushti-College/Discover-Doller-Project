@@ -2,69 +2,101 @@ pipeline {
   agent any
 
   environment {
-    DOCKERHUB_CREDENTIALS = 'dockerhub-creds'   
-    DOCKERHUB_USER = 'srushti22'
+    DOCKERHUB_CREDENTIALS = 'dockerhub-creds'    
     IMAGE_BACKEND = "srushti22/crud-backend"
     IMAGE_FRONTEND = "srushti22/crud-frontend"
-    COMPOSE_PATH = "${WORKSPACE}"   
+    COMPOSE_PATH = "${env.WORKSPACE}"            
   }
 
   stages {
     stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Verify docker CLI') {
       steps {
-        checkout scm
+        sh '''
+          echo "Checking docker availability..."
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "ERROR: docker CLI not found on this agent."
+            echo "If Jenkins runs in a container, restart it mapping /var/run/docker.sock:/var/run/docker.sock and /usr/bin/docker:/usr/bin/docker"
+            exit 127
+          fi
+          docker --version || true
+        '''
       }
     }
 
-    stage('Build Backend Image') {
+    stage('Login to Docker Hub') {
+      steps {
+        
+        withCredentials([usernamePassword(credentialsId: "${DOCKERHUB_CREDENTIALS}",
+                                          usernameVariable: 'DOCKERHUB_USER',
+                                          passwordVariable: 'DOCKERHUB_PASSWORD')]) {
+          sh 'echo "$DOCKERHUB_PASSWORD" | docker login -u "$DOCKERHUB_USER" --password-stdin'
+        }
+      }
+    }
+
+    stage('Build & Push Backend') {
       steps {
         dir('backend') {
           script {
-            docker.build("${env.IMAGE_BACKEND}:${env.BUILD_NUMBER}").push()
-            docker.image("${env.IMAGE_BACKEND}:${env.BUILD_NUMBER}").push()
+            sh """
+              set -e
+              echo "Building ${IMAGE_BACKEND}:${BUILD_NUMBER}"
+              docker build -t ${IMAGE_BACKEND}:${BUILD_NUMBER} .
+              docker push ${IMAGE_BACKEND}:${BUILD_NUMBER}
+              docker tag ${IMAGE_BACKEND}:${BUILD_NUMBER} ${IMAGE_BACKEND}:latest
+              docker push ${IMAGE_BACKEND}:latest
+            """
           }
         }
       }
     }
 
-    stage('Build Frontend Image') {
+    stage('Build & Push Frontend') {
       steps {
         dir('frontend') {
           script {
-            docker.build("${env.IMAGE_FRONTEND}:${env.BUILD_NUMBER}").push()
-            docker.image("${env.IMAGE_FRONTEND}:${env.BUILD_NUMBER}").push()
+            sh """
+              set -e
+              echo "Building ${IMAGE_FRONTEND}:${BUILD_NUMBER}"
+              docker build -t ${IMAGE_FRONTEND}:${BUILD_NUMBER} .
+              docker push ${IMAGE_FRONTEND}:${BUILD_NUMBER}
+              docker tag ${IMAGE_FRONTEND}:${BUILD_NUMBER} ${IMAGE_FRONTEND}:latest
+              docker push ${IMAGE_FRONTEND}:latest
+            """
           }
         }
       }
     }
 
-    stage('Tag latest') {
+    stage('Deploy with Docker Compose') {
       steps {
         script {
-          sh "docker login -u ${DOCKERHUB_USER} -p ${DOCKERHUB_PASSWORD:-placeholder}"
-          sh "docker tag ${IMAGE_BACKEND}:${env.BUILD_NUMBER} ${IMAGE_BACKEND}:latest"
-          sh "docker push ${IMAGE_BACKEND}:latest"
-          sh "docker tag ${IMAGE_FRONTEND}:${env.BUILD_NUMBER} ${IMAGE_FRONTEND}:latest"
-          sh "docker push ${IMAGE_FRONTEND}:latest"
+          sh """
+            set -e
+            echo "Deploying via docker/compose (using host docker via socket)..."
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${COMPOSE_PATH}:/app -w /app docker/compose:2.20.2 pull
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${COMPOSE_PATH}:/app -w /app docker/compose:2.20.2 up -d --remove-orphans
+          """
         }
-      }
-    }
-
-    stage('Deploy to Server') {
-      steps {
-        
-        sh """
-          
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${COMPOSE_PATH}:/app -w /app docker/compose:2.20.2 pull
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${COMPOSE_PATH}:/app -w /app docker/compose:2.20.2 up -d --remove-orphans
-        """
       }
     }
   }
 
   post {
-    success { echo "Pipeline completed" }
-    failure { echo "Pipeline failed" }
+    always {
+      
+      sh 'docker logout || true'
+    }
+    success {
+      echo "Pipeline completed successfully."
+    }
+    failure {
+      echo "Pipeline failed. Check console output for details."
+    }
   }
 }
 
