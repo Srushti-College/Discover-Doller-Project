@@ -77,8 +77,22 @@ pipeline {
           script {
            sh """
             set -e
+
+            echo "Fixing docker-compose path..."
+
+                    # Find docker-compose on the host and symlink to /usr/local/bin
+                    if command -v docker-compose >/dev/null 2>&1; then
+                      sudo ln -sf "$(command -v docker-compose)" /usr/local/bin/docker-compose || true
+                      sudo chmod +x /usr/local/bin/docker-compose || true
+                    fi
+
+                    # verify
+                    echo "docker-compose path:"
+                    command -v docker-compose || echo "NOT FOUND"
+                    docker-compose --version || true
+
             echo "Deploying via host docker compose..."
-            cd ${COMPOSE_PATH}
+            cd /var/jenkins_home/workspace/Discover-doller
             docker-compose pull
             docker-compose up -d --remove-orphans
           """
