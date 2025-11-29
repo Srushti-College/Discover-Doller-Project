@@ -79,8 +79,8 @@ pipeline {
             set -e
             echo "Deploying via host docker compose..."
             cd ${COMPOSE_PATH}
-            docker compose pull
-            docker compose up -d --remove-orphans
+            docker-compose pull
+            docker-compose up -d --remove-orphans
           """
         }
       } 
