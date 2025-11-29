@@ -72,17 +72,18 @@ pipeline {
       }
     }
 
-    stage('Deploy with Docker Compose') {
-      steps {
-        script {
-          sh """
+     stage('Deploy with Docker Compose') {
+        steps {
+          script {
+           sh """
             set -e
-            echo "Deploying via docker/compose (using host docker via socket)..."
-            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${COMPOSE_PATH}:/app -w /app docker/compose:2.20.2 pull
-            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${COMPOSE_PATH}:/app -w /app docker/compose:2.20.2 up -d --remove-orphans
+            echo "Deploying via host docker compose..."
+            cd ${COMPOSE_PATH}
+            docker compose pull
+            docker compose up -d --remove-orphans
           """
         }
-      }
+      } 
     }
   }
 
